@@ -15,6 +15,7 @@
  * - ['sales-inventory', { ownerId, selectedBranch, staffBranchId }]
  * - ['sales-customers', { ownerId, selectedBranch }]
  */
+import { branchFilter, debounce } from '@/lib/realtimeScope';
 import { useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/db';
