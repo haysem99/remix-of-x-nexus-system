@@ -73,19 +73,21 @@ export default function InventoryManagement() {
     fetchMedicines();
   }, [selectedBranch]);
 
-  // Live updates: refetch when stock-affecting tables change or app:refresh fires.
+  // Live updates: branch-scoped + debounced (was table-wide on 3 tables,
+  // incl. the global medicines catalog, refetching everything per event).
   useEffect(() => {
-    const handler = () => fetchMedicines();
+    const handler = debounce(() => fetchMedicines(), 2000);
     window.addEventListener('app:refresh', handler);
-    const channel = (supabase as any)
-      .channel(`inv-mgmt-${selectedBranch || 'all'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items' }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, handler)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicines' }, handler)
-      .subscribe();
+    const channel = selectedBranch
+      ? (supabase as any)
+          .channel(`inv-mgmt-${selectedBranch}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items', filter: branchFilter([selectedBranch]) }, handler)
+          .subscribe()
+      : null;
     return () => {
+      handler.cancel();
       window.removeEventListener('app:refresh', handler);
-      (supabase as any).removeChannel(channel);
+      if (channel) (supabase as any).removeChannel(channel);
     };
   }, [selectedBranch]);
 

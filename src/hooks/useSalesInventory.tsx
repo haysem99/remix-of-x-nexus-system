@@ -281,20 +281,19 @@ export function useSalesInventory() {
     return () => window.removeEventListener('app:refresh', handler);
   }, [queryClient]);
 
-  // Realtime: refetch when branch_items / inventory_batches change for our scope.
+  // Realtime: branch-scoped (server-side filter) + debounced. Stock changes
+  // (sales, batch edits, transfers) all update branch_items.quantity, so a
+  // single branch_items subscription covers them without table-wide events.
   useEffect(() => {
     if (!enabled || branchIds.length === 0) return;
-    const invalidate = () => {
-      queryClient.refetchQueries({ queryKey: ['sales-inventory'] });
-      queryClient.refetchQueries({ queryKey: ['branch-inventory'] });
-    };
+    const invalidate = debounce(() => {
+      queryClient.refetchQueries({ queryKey: ['sales-inventory'], type: 'active' });
+    }, 1500);
     const channel = (supabase as any)
       .channel(`sales-inv-${branchIds.join('-')}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items' }, invalidate)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, invalidate)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sale_items' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items', filter: branchFilter(branchIds) }, invalidate)
       .subscribe();
-    return () => { (supabase as any).removeChannel(channel); };
+    return () => { invalidate.cancel(); (supabase as any).removeChannel(channel); };
   }, [enabled, branchIds.join(','), queryClient]);
 
   return {

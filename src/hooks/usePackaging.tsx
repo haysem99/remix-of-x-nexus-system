@@ -15,21 +15,27 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/db';
 import { Packaging, defaultPackaging } from '@/lib/packaging';
 
+// Previously every usePackaging() caller opened its own table-wide realtime
+// channel (one per row rendered!). Packaging changes rarely and edits in-app
+// already invalidate the cache, so we only listen to the manual refresh event,
+// registered once globally.
+let packagingListenerRefs = 0;
+let packagingHandler: (() => void) | null = null;
 function usePackagingInvalidation() {
   const queryClient = useQueryClient();
   useEffect(() => {
-    const invalidate = () => {
-      queryClient.invalidateQueries({ queryKey: ['medicine_packaging'] });
-      queryClient.invalidateQueries({ queryKey: ['medicine_packaging_map'] });
-    };
-    window.addEventListener('app:refresh', invalidate);
-    const channel = (supabase as any)
-      .channel(`medicine-packaging-${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicine_packaging' }, invalidate)
-      .subscribe();
+    if (packagingListenerRefs++ === 0) {
+      packagingHandler = () => {
+        queryClient.invalidateQueries({ queryKey: ['medicine_packaging'] });
+        queryClient.invalidateQueries({ queryKey: ['medicine_packaging_map'] });
+      };
+      window.addEventListener('app:refresh', packagingHandler);
+    }
     return () => {
-      window.removeEventListener('app:refresh', invalidate);
-      (supabase as any).removeChannel(channel);
+      if (--packagingListenerRefs === 0 && packagingHandler) {
+        window.removeEventListener('app:refresh', packagingHandler);
+        packagingHandler = null;
+      }
     };
   }, [queryClient]);
 }
