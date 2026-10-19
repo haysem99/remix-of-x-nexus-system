@@ -75,18 +75,14 @@ export default function InventoryDashboard() {
     fetchInventoryData();
   }, [selectedBranch, thresholdDays, lowStockThreshold]);
 
+  // Removed table-wide realtime: every stock UPDATE anywhere in the system
+  // (all owners) re-downloaded this whole alerts dataset. Alerts now refresh
+  // on branch/threshold change and on the global pull-to-refresh event.
   useEffect(() => {
-    const channel = supabase
-      .channel('branch-items-changes')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'branch_items' },
-        () => fetchInventoryData()
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    const handler = () => fetchInventoryData();
+    window.addEventListener('app:refresh', handler);
+    return () => window.removeEventListener('app:refresh', handler);
+  }, [selectedBranch, thresholdDays, lowStockThreshold]);
 
   const fetchInventoryData = async () => {
     try {

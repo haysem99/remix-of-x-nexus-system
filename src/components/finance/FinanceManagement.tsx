@@ -231,21 +231,19 @@ export default function FinanceManagement() {
 
   useEffect(() => {
     fetchFinanceData();
+  }, [period, startDate, endDate, selectedBranch]);
+
+  // Branches list rarely changes — fetch once, not on every filter change.
+  // Table-wide `expenses` realtime removed: any owner's expense used to
+  // re-download all finance data for everyone. Local writes call
+  // fetchFinanceData() directly; pull-to-refresh covers the rest.
+  useEffect(() => {
     fetchBranches();
-
-    const expenseSubscription = supabase
-      .channel('expense-changes')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'expenses' },
-        () => {
-          fetchFinanceData();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(expenseSubscription);
-    };
+  }, []);
+  useEffect(() => {
+    const handler = () => fetchFinanceData();
+    window.addEventListener('app:refresh', handler);
+    return () => window.removeEventListener('app:refresh', handler);
   }, [period, startDate, endDate, selectedBranch]);
 
   const fetchFinanceData = async () => {

@@ -13,6 +13,7 @@
  * Cache key: ['branch-inventory', { ownerId, selectedBranch, staffBranchId }]
  * Stale time: 60s.
  */
+import { branchFilter, debounce } from '@/lib/realtimeScope';
 import { useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/db';
@@ -245,19 +246,30 @@ export function useBranchInventory() {
     return () => window.removeEventListener('app:refresh', handler);
   }, [queryClient]);
 
-  // Realtime: refresh on stock-affecting changes for the in-scope branches.
+  // Realtime: patch changed rows in place instead of re-downloading the
+  // whole inventory. Only INSERT/DELETE (rare) trigger a debounced refetch.
   useEffect(() => {
     if (!enabled || branchIds.length === 0) return;
-    const invalidate = () => {
-      queryClient.refetchQueries({ queryKey: ['branch-inventory'] });
-      queryClient.refetchQueries({ queryKey: ['sales-inventory'] });
+    const refetchAll = debounce(() => {
+      queryClient.refetchQueries({ queryKey: ['branch-inventory'], type: 'active' });
+    }, 2000);
+    const onChange = (payload: any) => {
+      if (payload.eventType === 'UPDATE' && payload.new?.id) {
+        const n = payload.new;
+        queryClient.setQueriesData<EnrichedBranchItem[]>({ queryKey: ['branch-inventory'] }, (prev) =>
+          prev?.map((it) => it.id === n.id
+            ? { ...it, quantity: n.quantity, selling_price: n.selling_price, purchase_price: n.purchase_price, expiry_date: n.expiry_date }
+            : it)
+        );
+        return;
+      }
+      refetchAll();
     };
     const channel = (supabase as any)
       .channel(`branch-inv-${branchIds.join('-')}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items' }, invalidate)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_items', filter: branchFilter(branchIds) }, onChange)
       .subscribe();
-    return () => { (supabase as any).removeChannel(channel); };
+    return () => { refetchAll.cancel(); (supabase as any).removeChannel(channel); };
   }, [enabled, branchIds.join(','), queryClient]);
 
   return {
